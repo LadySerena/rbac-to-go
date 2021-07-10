@@ -25,3 +25,4 @@ gen
 
 # don't include test cases from other projects
 test-resources/*.yaml
+release

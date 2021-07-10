@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-	clusterRole, parseErr := parser.ParseRole()
+	clusterRole, _, _, _, parseErr := parser.Parse()
 	if parseErr != nil {
 		log.Printf("error parsing role: %v", parseErr)
 	}
