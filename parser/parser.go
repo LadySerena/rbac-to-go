@@ -30,6 +30,7 @@ import (
 
 type ParsingError interface {
 	getKind() string
+	Error() string
 }
 
 type ShortDocumentError struct {
@@ -44,6 +45,15 @@ func (s ShortDocumentError) getKind() string {
 }
 
 type DownStreamError struct {
+	err error
+}
+
+func (d DownStreamError) getKind() string {
+	return "downstream-error"
+}
+
+func (d DownStreamError) Error() string {
+	return d.err.Error()
 }
 
 func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBinding, error) {
@@ -58,71 +68,35 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 	}
 	documentList := bytes.Split(content, []byte("---\n"))
 	for _, document := range documentList {
-		if len(document) < 2 {
-			continue // skip things without content to deal with spliting yaml documents within 1 file
-		}
-		raw := unstructured.Unstructured{}
-		unmarshalErr := yaml.Unmarshal(document, &raw)
-		if unmarshalErr != nil {
-			return nil, nil, nil, nil, unmarshalErr
-		}
-		metadata := metav1.ObjectMeta{
-			Name:                       raw.GetName(),
-			GenerateName:               raw.GetGenerateName(),
-			Namespace:                  raw.GetNamespace(),
-			UID:                        raw.GetUID(),
-			ResourceVersion:            raw.GetResourceVersion(),
-			Generation:                 raw.GetGeneration(),
-			CreationTimestamp:          raw.GetCreationTimestamp(),
-			DeletionTimestamp:          raw.GetDeletionTimestamp(),
-			DeletionGracePeriodSeconds: raw.GetDeletionGracePeriodSeconds(),
-			Labels:                     raw.GetLabels(),
-			Annotations:                raw.GetAnnotations(),
-			OwnerReferences:            raw.GetOwnerReferences(),
-			Finalizers:                 raw.GetFinalizers(),
-			ClusterName:                raw.GetClusterName(),
-			ManagedFields:              raw.GetManagedFields(),
+		typeMeta, _, raw, firstRoundErr := FirstRound(document)
+		if firstRoundErr != nil {
+			return nil, nil, nil, nil, firstRoundErr
 		}
 
-		typeMeta := metav1.TypeMeta{
-			Kind:       raw.GetKind(),
-			APIVersion: raw.GetAPIVersion(),
-		}
 
-		var rbacRule []v1.PolicyRule
 
 		if typeMeta.Kind == "ClusterRole" || typeMeta.Kind == "Role" {
-			rawRules := raw.Object["rules"]
-			ruleInterfaceList := rawRules.([]interface{}) // todo safely assert type
-			for _, ruleInterface := range ruleInterfaceList {
-				testRule := ruleInterface.(map[string]interface{}) // todo safely assert type
-				ruleBytes, marshalErr := json.Marshal(testRule)
-				if marshalErr != nil {
-					return nil, nil, nil, nil, marshalErr
-				}
-				parsedRule := v1.PolicyRule{}
-				parseErr := json.Unmarshal(ruleBytes, &parsedRule)
-				if parseErr != nil {
-					return nil, nil, nil, nil, parseErr
-				}
-				rbacRule = append(rbacRule, parsedRule)
+			_, ruleErr := ExtractRules(raw)
+			if ruleErr != nil {
+				return nil,nil,nil,nil, ruleErr
 			}
+
 		}
 
 	}
-	return nil, nil, nil, nil, nil
+	return clusterRoleList, clusterRoleBindingList, roleList, roleBindingList, nil
 }
 
 func FirstRound(document []byte) (*metav1.TypeMeta, *metav1.ObjectMeta, *unstructured.Unstructured, ParsingError) {
 	if len(document) < 2 {
 		return nil, nil, nil, nil // skip things without content to deal with spliting yaml documents within 1 file
 	}
-	raw := unstructured.Unstructured{}
-	unmarshalErr := yaml.Unmarshal(document, &raw)
+	raw := &unstructured.Unstructured{}
+	unmarshalErr := yaml.Unmarshal(document, raw)
 	if unmarshalErr != nil {
-		return nil, nil, nil,
+		return nil, nil, nil, DownStreamError{err: unmarshalErr}
 	}
-	metadata := metav1.ObjectMeta{
+	metadata := &metav1.ObjectMeta{
 		Name:                       raw.GetName(),
 		GenerateName:               raw.GetGenerateName(),
 		Namespace:                  raw.GetNamespace(),
@@ -140,8 +114,30 @@ func FirstRound(document []byte) (*metav1.TypeMeta, *metav1.ObjectMeta, *unstruc
 		ManagedFields:              raw.GetManagedFields(),
 	}
 
-	typeMeta := metav1.TypeMeta{
+	typeMeta := &metav1.TypeMeta{
 		Kind:       raw.GetKind(),
 		APIVersion: raw.GetAPIVersion(),
 	}
+	return typeMeta, metadata, raw, nil
 }
+
+func ExtractRules(raw *unstructured.Unstructured) ([]v1.PolicyRule, ParsingError) {
+	var rbacRule []v1.PolicyRule
+	rawRules := raw.Object["rules"]
+	ruleInterfaceList := rawRules.([]interface{}) // todo safely assert type
+	for _, ruleInterface := range ruleInterfaceList {
+		testRule := ruleInterface.(map[string]interface{}) // todo safely assert type
+		ruleBytes, marshalErr := json.Marshal(testRule)
+		if marshalErr != nil {
+			return nil, DownStreamError{err: marshalErr}
+		}
+		parsedRule := v1.PolicyRule{}
+		parseErr := json.Unmarshal(ruleBytes, &parsedRule)
+		if parseErr != nil {
+			return nil, DownStreamError{err: parseErr}
+		}
+		rbacRule = append(rbacRule, parsedRule)
+	}
+	return rbacRule, nil
+}
+
