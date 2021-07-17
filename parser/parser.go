@@ -19,6 +19,7 @@ package parser
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -61,28 +62,72 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 	var clusterRoleBindingList []v1.ClusterRoleBinding
 	var roleList []v1.Role
 	var roleBindingList []v1.RoleBinding
+	const clusterRoleKind = "ClusterRole"
+	const clusterRoleBindingKind = "ClusterRoleBinding"
+	const roleKind = "Role"
+	const roleBindingKind = "RoleBinding"
 
-	content, readErr := os.ReadFile("release/operator/rbac.yaml")
+	content, readErr := os.ReadFile("test-resources/release/operator/rbac.yaml")
 	if readErr != nil {
 		return nil, nil, nil, nil, readErr
 	}
 	documentList := bytes.Split(content, []byte("---\n"))
 	for _, document := range documentList {
-		typeMeta, _, raw, firstRoundErr := FirstRound(document)
+		typeMeta, objectMeta, raw, firstRoundErr := FirstRound(document)
 		if firstRoundErr != nil {
 			return nil, nil, nil, nil, firstRoundErr
 		}
 
-
-
-		if typeMeta.Kind == "ClusterRole" || typeMeta.Kind == "Role" {
-			_, ruleErr := ExtractRules(raw)
+		switch typeMeta.Kind {
+		case roleKind:
+			rules, ruleErr := ExtractRules(raw)
 			if ruleErr != nil {
-				return nil,nil,nil,nil, ruleErr
+				return nil, nil, nil, nil, ruleErr
 			}
+			role := v1.Role{
+				TypeMeta: *typeMeta,
+				ObjectMeta: *objectMeta,
+				Rules:      rules,
+			}
+			roleList = append(roleList, role)
+		case clusterRoleKind:
+			rules, ruleErr := ExtractRules(raw)
+			if ruleErr != nil {
+				return nil, nil, nil, nil, ruleErr
+			}
+			role := v1.ClusterRole{
+				TypeMeta: *typeMeta,
+				ObjectMeta: *objectMeta,
+				Rules:      rules,
+				AggregationRule: nil,
+			}
+			clusterRoleList = append(clusterRoleList, role)
+		case roleBindingKind:
+			roleRef, subjects, extractErr := ExtractRoleRefAndSubjects(raw)
+			if extractErr != nil {
+				return nil, nil, nil, nil, extractErr
+			}
+			roleBinding := v1.RoleBinding{
+				TypeMeta: *typeMeta,
+				ObjectMeta: *objectMeta,
+				Subjects:   subjects,
+				RoleRef: *roleRef,
+			}
+			roleBindingList = append(roleBindingList, roleBinding)
 
+		case clusterRoleBindingKind:
+			roleRef, subjects, extractErr := ExtractRoleRefAndSubjects(raw)
+			if extractErr != nil {
+				return nil, nil, nil, nil, extractErr
+			}
+			roleBinding := v1.ClusterRoleBinding{
+				TypeMeta: *typeMeta,
+				ObjectMeta: *objectMeta,
+				Subjects:   subjects,
+				RoleRef: *roleRef,
+			}
+			clusterRoleBindingList = append(clusterRoleBindingList, roleBinding)
 		}
-
 	}
 	return clusterRoleList, clusterRoleBindingList, roleList, roleBindingList, nil
 }
@@ -123,21 +168,44 @@ func FirstRound(document []byte) (*metav1.TypeMeta, *metav1.ObjectMeta, *unstruc
 
 func ExtractRules(raw *unstructured.Unstructured) ([]v1.PolicyRule, ParsingError) {
 	var rbacRule []v1.PolicyRule
-	rawRules := raw.Object["rules"]
-	ruleInterfaceList := rawRules.([]interface{}) // todo safely assert type
-	for _, ruleInterface := range ruleInterfaceList {
-		testRule := ruleInterface.(map[string]interface{}) // todo safely assert type
-		ruleBytes, marshalErr := json.Marshal(testRule)
-		if marshalErr != nil {
-			return nil, DownStreamError{err: marshalErr}
-		}
-		parsedRule := v1.PolicyRule{}
-		parseErr := json.Unmarshal(ruleBytes, &parsedRule)
-		if parseErr != nil {
-			return nil, DownStreamError{err: parseErr}
-		}
-		rbacRule = append(rbacRule, parsedRule)
+	ruleInterfaceList := raw.Object["rules"].([]interface{})
+	ruleBytes, marshalErr := json.Marshal(ruleInterfaceList)
+	if marshalErr != nil {
+		return nil, DownStreamError{err: marshalErr}
+	}
+	parseErr := json.Unmarshal(ruleBytes, &rbacRule)
+	if parseErr != nil {
+		return nil, DownStreamError{err: parseErr}
 	}
 	return rbacRule, nil
+}
+
+func ExtractRoleRefAndSubjects(raw *unstructured.Unstructured) (*v1.RoleRef, []v1.Subject, error) {
+	roleRef := &v1.RoleRef{}
+	var subjects []v1.Subject
+	rawRoleRef, exists := raw.Object["roleRef"]
+	if !exists {
+		return nil, nil, errors.New("required key is missing")
+	}
+	testRoleRef := rawRoleRef.(map[string]interface{})
+	refBytes, marshalErr := json.Marshal(testRoleRef)
+	if marshalErr != nil {
+		return nil, nil, marshalErr
+	}
+	parsingErr := json.Unmarshal(refBytes, roleRef)
+	if parsingErr != nil {
+		return nil, nil, parsingErr
+	}
+	rawSubjects := raw.Object["subjects"].([]interface{})
+	subjectBytes, subjectMarshalErr := json.Marshal(rawSubjects)
+	if subjectMarshalErr != nil {
+		return nil, nil, subjectMarshalErr
+	}
+	subjectParseErr := json.Unmarshal(subjectBytes, &subjects)
+	if subjectParseErr != nil {
+		return nil, nil, subjectParseErr
+	}
+	return roleRef, subjects, nil
+
 }
 
