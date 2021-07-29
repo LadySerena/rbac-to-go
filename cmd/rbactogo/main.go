@@ -17,16 +17,19 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
+	"github.com/ladyserena/rbac-to-go/output"
 	"github.com/ladyserena/rbac-to-go/parser"
+	"github.com/ladyserena/rbac-to-go/sample"
 )
 
 func main() {
-	clusterRole, _, _, _, parseErr := parser.Parse()
+	_, _, _, _, parseErr := parser.Parse()
 	if parseErr != nil {
 		log.Printf("error parsing role: %v", parseErr)
 	}
-	fmt.Printf("cluster role is: %v\n", clusterRole)
+
+	output.WritePreamble()
+	sample.ApplyRbac(nil)
 }

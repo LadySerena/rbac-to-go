@@ -15,3 +15,38 @@
  */
 
 package output
+
+import "bytes"
+
+const (
+	name = "test.go"
+)
+
+func WritePreamble() error {
+	var buffer bytes.Buffer
+	writePackageName("foo", &buffer)
+	writeLine("", &buffer)
+	writeImports(&buffer)
+	return nil
+}
+
+func writePackageName(name string, buffer *bytes.Buffer) error {
+	return writeLine("package "+name, buffer)
+}
+
+func writeImports(buffer *bytes.Buffer) error {
+	writeLine("imports (", buffer)
+	writeLine("\trbacv1 \"k8s.io/api/rbac/v1\"", buffer)
+	writeLine(")", buffer)
+	return nil
+}
+
+func write(content string, buffer *bytes.Buffer) error {
+	_, writeErr := buffer.WriteString(content)
+	return writeErr
+}
+
+func writeLine(content string, buffer *bytes.Buffer) error {
+	_, writeErr := buffer.WriteString(content + "\n")
+	return writeErr
+}

@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"os"
 
-	v1 "k8s.io/api/rbac/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
@@ -57,11 +57,11 @@ func (d DownStreamError) Error() string {
 	return d.err.Error()
 }
 
-func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBinding, error) {
-	var clusterRoleList []v1.ClusterRole
-	var clusterRoleBindingList []v1.ClusterRoleBinding
-	var roleList []v1.Role
-	var roleBindingList []v1.RoleBinding
+func Parse() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding, []rbacv1.Role, []rbacv1.RoleBinding, error) {
+	var clusterRoleList []rbacv1.ClusterRole
+	var clusterRoleBindingList []rbacv1.ClusterRoleBinding
+	var roleList []rbacv1.Role
+	var roleBindingList []rbacv1.RoleBinding
 	const clusterRoleKind = "ClusterRole"
 	const clusterRoleBindingKind = "ClusterRoleBinding"
 	const roleKind = "Role"
@@ -84,8 +84,8 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 			if ruleErr != nil {
 				return nil, nil, nil, nil, ruleErr
 			}
-			role := v1.Role{
-				TypeMeta: *typeMeta,
+			role := rbacv1.Role{
+				TypeMeta:   *typeMeta,
 				ObjectMeta: *objectMeta,
 				Rules:      rules,
 			}
@@ -95,10 +95,10 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 			if ruleErr != nil {
 				return nil, nil, nil, nil, ruleErr
 			}
-			role := v1.ClusterRole{
-				TypeMeta: *typeMeta,
-				ObjectMeta: *objectMeta,
-				Rules:      rules,
+			role := rbacv1.ClusterRole{
+				TypeMeta:        *typeMeta,
+				ObjectMeta:      *objectMeta,
+				Rules:           rules,
 				AggregationRule: nil,
 			}
 			clusterRoleList = append(clusterRoleList, role)
@@ -107,11 +107,11 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 			if extractErr != nil {
 				return nil, nil, nil, nil, extractErr
 			}
-			roleBinding := v1.RoleBinding{
-				TypeMeta: *typeMeta,
+			roleBinding := rbacv1.RoleBinding{
+				TypeMeta:   *typeMeta,
 				ObjectMeta: *objectMeta,
 				Subjects:   subjects,
-				RoleRef: *roleRef,
+				RoleRef:    *roleRef,
 			}
 			roleBindingList = append(roleBindingList, roleBinding)
 
@@ -120,11 +120,11 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 			if extractErr != nil {
 				return nil, nil, nil, nil, extractErr
 			}
-			roleBinding := v1.ClusterRoleBinding{
-				TypeMeta: *typeMeta,
+			roleBinding := rbacv1.ClusterRoleBinding{
+				TypeMeta:   *typeMeta,
 				ObjectMeta: *objectMeta,
 				Subjects:   subjects,
-				RoleRef: *roleRef,
+				RoleRef:    *roleRef,
 			}
 			clusterRoleBindingList = append(clusterRoleBindingList, roleBinding)
 		}
@@ -134,7 +134,7 @@ func Parse() ([]v1.ClusterRole, []v1.ClusterRoleBinding, []v1.Role, []v1.RoleBin
 
 func FirstRound(document []byte) (*metav1.TypeMeta, *metav1.ObjectMeta, *unstructured.Unstructured, ParsingError) {
 	if len(document) < 2 {
-		return nil, nil, nil, nil // skip things without content to deal with spliting yaml documents within 1 file
+		return nil, nil, nil, nil // skip things without content to deal with splitting yaml documents within 1 file
 	}
 	raw := &unstructured.Unstructured{}
 	unmarshalErr := yaml.Unmarshal(document, raw)
@@ -166,8 +166,8 @@ func FirstRound(document []byte) (*metav1.TypeMeta, *metav1.ObjectMeta, *unstruc
 	return typeMeta, metadata, raw, nil
 }
 
-func ExtractRules(raw *unstructured.Unstructured) ([]v1.PolicyRule, ParsingError) {
-	var rbacRule []v1.PolicyRule
+func ExtractRules(raw *unstructured.Unstructured) ([]rbacv1.PolicyRule, ParsingError) {
+	var rbacRule []rbacv1.PolicyRule
 	ruleInterfaceList := raw.Object["rules"].([]interface{})
 	ruleBytes, marshalErr := json.Marshal(ruleInterfaceList)
 	if marshalErr != nil {
@@ -180,9 +180,9 @@ func ExtractRules(raw *unstructured.Unstructured) ([]v1.PolicyRule, ParsingError
 	return rbacRule, nil
 }
 
-func ExtractRoleRefAndSubjects(raw *unstructured.Unstructured) (*v1.RoleRef, []v1.Subject, error) {
-	roleRef := &v1.RoleRef{}
-	var subjects []v1.Subject
+func ExtractRoleRefAndSubjects(raw *unstructured.Unstructured) (*rbacv1.RoleRef, []rbacv1.Subject, error) {
+	roleRef := &rbacv1.RoleRef{}
+	var subjects []rbacv1.Subject
 	rawRoleRef, exists := raw.Object["roleRef"]
 	if !exists {
 		return nil, nil, errors.New("required key is missing")
@@ -208,4 +208,3 @@ func ExtractRoleRefAndSubjects(raw *unstructured.Unstructured) (*v1.RoleRef, []v
 	return roleRef, subjects, nil
 
 }
-
