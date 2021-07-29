@@ -17,11 +17,11 @@
 package sample
 
 import (
-	"fmt"
+	"context"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func getRoleTypeMeta() metav1.TypeMeta {
@@ -61,11 +61,33 @@ func generateObjectMeta(name string, namespace string, labels map[string]string,
 	}
 }
 
-func ApplyRbac(client client.Client) error {
+func generateRoleReference(kind, name string) rbacv1.RoleRef {
+	const rbacAPIGroup = "rbac.authorization.k8s.io"
+	return rbacv1.RoleRef{
+		Kind:     kind,
+		Name:     name,
+		APIGroup: rbacAPIGroup,
+	}
+}
+
+func generateSubject(kind, name, namespace string) rbacv1.Subject {
+	return rbacv1.Subject{
+		Kind:      kind,
+		Name:      name,
+		Namespace: namespace,
+	}
+}
+
+func ApplyRbac(client k8sclient.Client) error {
+
+	const serviceAccountKind = "ServiceAccount"
+	const roleKind = "Role"
+	const clusterRoleKind = "ClusterRole"
+
 	roles := []rbacv1.Role{
 		{
 			TypeMeta:   getRoleTypeMeta(),
-			ObjectMeta: generateObjectMeta("leader-election-role", "monitoring-system", map[string]string{}, map[string]string{}),
+			ObjectMeta: generateObjectMeta("leader-election-clusterRoleBinding", "monitoring-system", map[string]string{}, map[string]string{}),
 			Rules: []rbacv1.PolicyRule{
 				{
 					APIGroups: []string{
@@ -87,39 +109,23 @@ func ApplyRbac(client client.Client) error {
 			},
 		},
 	}
+
 	rolebindings := []rbacv1.RoleBinding{
 		{
-			TypeMeta: getRoleBindingTypeMeta(),
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "",
-				Namespace:   "",
-				Labels:      nil,
-				Annotations: nil,
+			TypeMeta:   getRoleBindingTypeMeta(),
+			ObjectMeta: generateObjectMeta("leader-election-rolebinding", "monitoring-system", map[string]string{}, map[string]string{}),
+			RoleRef:    generateRoleReference(roleKind, "leader-election-clusterRoleBinding"),
+			Subjects: []rbacv1.Subject{
+				generateSubject(serviceAccountKind, "vm-operator", "monitoring-system"),
+				generateSubject(serviceAccountKind, "vm-operator2", "monitoring-system"),
 			},
 		},
 	}
 
 	clusterRoles := []rbacv1.ClusterRole{
 		{
-			TypeMeta: getClusterRoleTypeMeta(),
-			ObjectMeta: metav1.ObjectMeta{
-				Name:                       "",
-				GenerateName:               "",
-				Namespace:                  "",
-				SelfLink:                   "",
-				UID:                        "",
-				ResourceVersion:            "",
-				Generation:                 0,
-				CreationTimestamp:          metav1.Time{},
-				DeletionTimestamp:          nil,
-				DeletionGracePeriodSeconds: nil,
-				Labels:                     nil,
-				Annotations:                nil,
-				OwnerReferences:            nil,
-				Finalizers:                 nil,
-				ClusterName:                "",
-				ManagedFields:              nil,
-			},
+			TypeMeta:   getClusterRoleTypeMeta(),
+			ObjectMeta: generateObjectMeta("vm-operator-psp-clusterRoleBinding", "", map[string]string{}, map[string]string{}),
 			Rules: []rbacv1.PolicyRule{
 				{
 					APIGroups: []string{
@@ -141,8 +147,46 @@ func ApplyRbac(client client.Client) error {
 			},
 		},
 	}
-	fmt.Printf("%v", roles)
-	fmt.Printf("%v", clusterRoles)
-	fmt.Printf("%v", rolebindings)
+
+	clusterRoleBindings := []rbacv1.ClusterRoleBinding{
+		{
+			TypeMeta:   getClusterRoleBindingTypeMeta(),
+			ObjectMeta: generateObjectMeta("manager-rolebinding", "", map[string]string{}, map[string]string{}),
+			RoleRef:    generateRoleReference(clusterRoleKind, "manager-clusterRoleBinding"),
+			Subjects: []rbacv1.Subject{
+				{
+					Kind:      "ServiceAccount",
+					APIGroup:  "",
+					Name:      "vm-operator",
+					Namespace: "monitoring-system",
+				},
+			},
+		},
+	}
+
+	for _, role := range roles {
+		if createErr := client.Create(context.TODO(), &role); createErr != nil {
+			return createErr
+		}
+	}
+
+	for _, clusterRole := range clusterRoles {
+		if createErr := client.Create(context.TODO(), &clusterRole); createErr != nil {
+			return createErr
+		}
+	}
+
+	for _, roleBinding := range rolebindings {
+		if createErr := client.Create(context.TODO(), &roleBinding); createErr != nil {
+			return createErr
+		}
+	}
+
+	for _, clusterRoleBinding := range clusterRoleBindings {
+		if createErr := client.Create(context.TODO(), &clusterRoleBinding); createErr != nil {
+			return createErr
+		}
+	}
+
 	return nil
 }
